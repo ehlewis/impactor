@@ -20,7 +20,7 @@ from core.orchestration.orchestrator import ScanOrchestrator
 from core.events.event_bus import EventBus
 from core.risk.prioritization_engine import recommend_fixes, recommend_fixes_with_ai
 from core.storage.storage_manager import StorageManager
-from scanners.snyk.plugin import SnykPlugin
+from scanners.snyk.plugin import SnykAPIPlugin, SnykCLIPlugin
 from scanners.semgrep.plugin import SemgrepPlugin
 
 load_environment()
@@ -30,7 +30,8 @@ app = typer.Typer()
 
 def build_registry() -> PluginRegistry:
     registry = PluginRegistry()
-    registry.register(SnykPlugin())
+    registry.register(SnykAPIPlugin())
+    registry.register(SnykCLIPlugin())
     registry.register(SemgrepPlugin())
     return registry
 

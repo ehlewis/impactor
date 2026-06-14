@@ -2,7 +2,6 @@
 from typing import Any, Dict, List
 import os
 
-from core.config.env_loader import get_env_variable
 from core.plugins.base import ScannerPlugin
 from core.models.finding import Finding
 import shutil
@@ -58,6 +57,42 @@ def _extract_snyk_issues(data: Any) -> List[Dict[str, Any]]:
     if issues:
         return issues
     return _find_nested_issue_lists(data)
+
+
+def _normalize_issue_evidence(issue: Dict[str, Any]) -> List[str]:
+    evidence: List[str] = []
+    if isinstance(issue.get('from'), list):
+        chain = [str(item) for item in issue.get('from') if item is not None]
+        if chain:
+            evidence.append(' -> '.join(chain))
+
+    location = issue.get('location')
+    if isinstance(location, dict):
+        path = location.get('path')
+        if path:
+            lines = location.get('lines')
+            if isinstance(lines, dict):
+                begin = lines.get('begin')
+                end = lines.get('end')
+                if begin and end and begin != end:
+                    evidence.append(f"{path}:{begin}-{end}")
+                elif begin:
+                    evidence.append(f"{path}:{begin}")
+                else:
+                    evidence.append(str(path))
+            else:
+                evidence.append(str(path))
+
+    if not evidence and issue.get('path'):
+        evidence.append(str(issue.get('path')))
+    if not evidence and issue.get('packageName'):
+        evidence.append(str(issue.get('packageName')))
+    if not evidence and issue.get('package'):
+        evidence.append(str(issue.get('package')))
+    if not evidence and issue.get('moduleName'):
+        evidence.append(str(issue.get('moduleName')))
+
+    return evidence
 
 
 def _load_json_safe(raw: str) -> Any:
@@ -122,161 +157,114 @@ def _ensure_snyk_subprocess_success(proc: subprocess.CompletedProcess, data: Any
         raise SystemExit(f"{command} failed for {target}: subprocess exited with code {proc.returncode} and no JSON output")
 
 
-class SnykPlugin(ScannerPlugin):
-    name = 'snyk'
+def _build_snyk_findings(items: List[Dict[str, Any]], prefix: str, target: str) -> List[Finding]:
+    findings: List[Finding] = []
+    for i, v in enumerate(items):
+        if not isinstance(v, dict):
+            continue
+        sev = _normalize_text_field(v.get('severity') or v.get('impact') or 'medium')
+        title = _normalize_text_field(v.get('title') or v.get('name') or v.get('message') or v.get('id') or v.get('issueId'))
+        description = _normalize_text_field(v.get('description') or v.get('message') or '')
+        evidence = _normalize_issue_evidence(v)
+        findings.append(
+            Finding(
+                id=f"{prefix}-{target}-{i}",
+                source='snyk',
+                severity=str(sev),
+                title=str(title),
+                description=description,
+                evidence=evidence,
+                metadata={'raw': v},
+            )
+        )
+    return findings
+
+
+class SnykAPIPlugin(ScannerPlugin):
+    name = 'snyk-api'
     version = '0.1.0'
 
+    @property
+    def enabled(self) -> bool:
+        return bool(os.getenv('SNYK_TOKEN'))
+
     def scan(self, target: str) -> List[Finding]:
-        # Prefer API token-based integrations when configured
-        api_token = get_env_variable('SNYK_TOKEN')
+        api_token = os.getenv('SNYK_TOKEN')
         snyk_org = os.getenv('SNYK_ORG')
         snyk_repo = os.getenv('SNYK_REPO')
         api_base = os.getenv('SNYK_API_BASE', 'https://snyk.io/api/v1')
-        if api_token:
-            # Try API-backed integration when token and org are provided
-            headers = {'Authorization': f'token {api_token}', 'Content-Type': 'application/json'}
-            try:
-                projects = []
-                if snyk_org:
-                    projects_url = f"{api_base}/org/{snyk_org}/projects"
-                    r = requests.get(projects_url, headers=headers, timeout=30)
-                    if r.status_code == 200:
-                        data = r.json()
-                        projects = data.get('projects') or data.get('projects', []) or data.get('projects', [])
-                # If org not provided or projects empty, try to list org projects across orgs (best-effort)
-                if not projects and snyk_repo:
-                    # No reliable cross-org listing implemented; fall back to CLI
-                    projects = []
 
-                all_items = []
-                for p in projects:
-                    project_id = p.get('id') or p.get('uuid') or p.get('projectId')
-                    if not project_id:
-                        continue
-                    # Optionally filter by repo/name
-                    name = p.get('name') or p.get('id') or ''
-                    if snyk_repo and snyk_repo not in name:
-                        continue
-                    issues_url = f"{api_base}/org/{snyk_org}/project/{project_id}/issues"
-                    r2 = requests.get(issues_url, headers=headers, timeout=30)
-                    if r2.status_code == 200:
-                        data2 = r2.json()
-                        # collect common issue lists
-                        for k in ('issues', 'vulnerabilities', 'vulns', 'results'):
-                            if isinstance(data2.get(k), list):
-                                all_items.extend(data2.get(k))
+        headers = {'Authorization': f'token {api_token}', 'Content-Type': 'application/json'}
+        projects = []
+        if snyk_org:
+            projects_url = f"{api_base}/org/{snyk_org}/projects"
+            r = requests.get(projects_url, headers=headers, timeout=30)
+            if r.status_code == 200:
+                data = r.json()
+                projects = data.get('projects') or []
 
-                # Convert API-sourced items into Findings
-                findings: List[Finding] = []
-                for i, v in enumerate(all_items):
-                    if not isinstance(v, dict):
-                        continue
-                    sev = _normalize_text_field(v.get('severity') or v.get('impact') or 'medium')
-                    title = _normalize_text_field(v.get('title') or v.get('name') or v.get('id') or v.get('issueId'))
-                    description = _normalize_text_field(v.get('description') or v.get('message') or '')
-                    evidence = []
-                    if isinstance(v.get('from'), list):
-                        evidence = [" -> ".join(v.get('from'))]
-                    elif isinstance(v.get('location'), dict):
-                        path = v.get('location', {}).get('path')
-                        if path:
-                            evidence = [path]
-                    elif v.get('packageName'):
-                        evidence = [v.get('packageName')]
-                    elif v.get('path'):
-                        evidence = [v.get('path')]
-                    findings.append(
-                        Finding(
-                            id=f"snyk-api-{i}",
-                            source='snyk',
-                            severity=str(sev),
-                            title=str(title),
-                            description=description,
-                            evidence=evidence,
-                            metadata={'raw': v},
-                        )
-                    )
-                return findings
-            except Exception:
-                # Fall back to CLI if API path fails
-                pass
+        if not projects and snyk_repo:
+            return []
 
-        # If no API token, attempt to use the local `snyk` CLI if installed
+        all_items: List[Dict[str, Any]] = []
+        for p in projects:
+            project_id = p.get('id') or p.get('uuid') or p.get('projectId')
+            if not project_id:
+                continue
+            name = p.get('name') or p.get('id') or ''
+            if snyk_repo and snyk_repo not in name:
+                continue
+            issues_url = f"{api_base}/org/{snyk_org}/project/{project_id}/issues"
+            r2 = requests.get(issues_url, headers=headers, timeout=30)
+            if r2.status_code == 200:
+                data2 = r2.json()
+                for k in ('issues', 'vulnerabilities', 'vulns', 'results'):
+                    if isinstance(data2.get(k), list):
+                        all_items.extend(data2.get(k))
+
+        return _build_snyk_findings(all_items, 'snyk-api', target)
+
+
+class SnykCLIPlugin(ScannerPlugin):
+    name = 'snyk-cli'
+    version = '0.1.0'
+
+    @property
+    def enabled(self) -> bool:
+        return bool(shutil.which('snyk')) and not bool(os.getenv('SNYK_TOKEN'))
+
+    def scan(self, target: str) -> List[Finding]:
         snyk_bin = shutil.which('snyk')
-        if snyk_bin:
-            try:
-                all_items = []
+        if not snyk_bin:
+            return []
+        
+        print(f"Running Snyk CLI scan on {target} using {snyk_bin}")
 
-                # Run `snyk test <target> --json`
-                proc = subprocess.run([snyk_bin, 'test', target, '--json'], capture_output=True, text=True, timeout=60)
-                out = proc.stdout or proc.stderr
-                data = _load_json_safe(out)
+        proc = subprocess.run([snyk_bin, 'test', target, '--json'], capture_output=True, text=True, timeout=60)
+        out = proc.stdout or proc.stderr
+        data = _load_json_safe(out)
+        _ensure_snyk_subprocess_success(proc, data, target, 'snyk test')
+        all_items: List[Dict[str, Any]] = _extract_snyk_issues(data)
 
-                _ensure_snyk_subprocess_success(proc, data, target, 'snyk test')
-                items1 = _extract_snyk_issues(data)
-                if items1:
-                    all_items.extend(items1)
+        proc2 = subprocess.run([snyk_bin, 'code', 'test', target, '--json'], capture_output=True, text=True, timeout=None)
+        out2 = proc2.stdout or proc2.stderr
+        data2 = _load_json_safe(out2)
+        _ensure_snyk_subprocess_success(proc2, data2, target, 'snyk code test')
+        all_items.extend(_extract_snyk_issues(data2))
 
-                # Run `snyk code test <target> --json` for Snyk Code issues
-                proc2 = subprocess.run([snyk_bin, 'code', 'test', target, '--json'], capture_output=True, text=True, timeout=None)
-                out2 = proc2.stdout or proc2.stderr
-                data2 = _load_json_safe(out2)
+        findings = _build_snyk_findings(all_items, 'snyk', target)
+        if findings:
+            return findings
 
-                _ensure_snyk_subprocess_success(proc2, data2, target, 'snyk code test')
-
-                items2 = _extract_snyk_issues(data2)
-                if items2:
-                    all_items.extend(items2)
-
-                # If we found combined items, convert to Findings
-                findings: List[Finding] = []
-                if all_items:
-                    for i, v in enumerate(all_items):
-                        if not isinstance(v, dict):
-                            continue
-                        # normalize common fields
-                        sev = _normalize_text_field(v.get('severity') or v.get('impact') or 'medium')
-                        title = _normalize_text_field(v.get('title') or v.get('message') or v.get('id') or v.get('name') or v.get('issueId'))
-                        description = _normalize_text_field(v.get('description') or v.get('message') or '')
-                        evidence = []
-                        if isinstance(v.get('from'), list):
-                            evidence = [" -> ".join(v.get('from'))]
-                        elif isinstance(v.get('location'), dict):
-                            path = v.get('location', {}).get('path')
-                            if path:
-                                evidence = [path]
-                        elif v.get('packageName'):
-                            evidence = [v.get('packageName')]
-                        elif v.get('path'):
-                            evidence = [v.get('path')]
-                        findings.append(
-                            Finding(
-                                id=f"snyk-{target}-{i}",
-                                source='snyk',
-                                severity=str(sev),
-                                title=str(title),
-                                description=description,
-                                evidence=evidence,
-                                metadata={'raw': v},
-                            )
-                        )
-                    return findings
-
-                # If no items found but Snyk ran, return an info finding
-                if proc.returncode == 0 or proc2.returncode == 0:
-                    return [
-                        Finding(
-                            id=f'snyk-{target}-0',
-                            source='snyk',
-                            severity='info',
-                            title='Snyk scan completed',
-                            description='Snyk completed but produced no structured issues.',
-                            evidence=[target],
-                        )
-                    ]
-            except Exception as e:
-                print(f"Error occurred while processing Snyk results for {target}: {e}")
-                return []
-
-        # No API token and no local CLI available — return empty results
+        if proc.returncode == 0 or proc2.returncode == 0:
+            return [
+                Finding(
+                    id=f'snyk-{target}-0',
+                    source='snyk',
+                    severity='info',
+                    title='Snyk scan completed',
+                    description='Snyk completed but produced no structured issues.',
+                    evidence=[target],
+                )
+            ]
         return []

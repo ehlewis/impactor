@@ -187,7 +187,7 @@ python cli/main.py scan . --use-ai --provider local-stub
 python cli/main.py scan . --use-ai --code-path src/
 ```
 
-If you have the Snyk CLI installed locally, Impcator will use it automatically when no `SNYK_TOKEN` is configured. Install Snyk locally with:
+If you have the Snyk CLI installed locally, Impcator will use it automatically when no `SNYK_TOKEN` is configured. This is exposed as the `snyk-cli` scanner plugin. Install Snyk locally with:
 
 ```bash
 npm install -g snyk
@@ -197,7 +197,7 @@ snyk auth
 
 Snyk API integration
 
-If you prefer API-backed Snyk integration, set `SNYK_TOKEN` and optionally scope scans to an organization and project (repo) using the CLI flags:
+If you prefer API-backed Snyk integration, set `SNYK_TOKEN` and optionally scope scans to an organization and project (repo) using the CLI flags. This is exposed as the `snyk-api` scanner plugin and is selected automatically whenever `SNYK_TOKEN` is configured:
 
 ```bash
 export SNYK_TOKEN="your-snyk-api-token"

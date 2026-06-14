@@ -88,6 +88,29 @@ def determine_priority(score: float) -> str:
     return 'Low'
 
 
+def _extract_evidence_path(value: str) -> str:
+    if ':' in value:
+        return value.split(':', 1)[0]
+    return value
+
+
+def _common_shared_code_evidence(group: List[Finding]) -> List[str]:
+    evidence_sets = [set(f.evidence) for f in group if f.evidence]
+    if not evidence_sets:
+        return []
+
+    shared = set.intersection(*evidence_sets)
+    if shared:
+        return sorted(shared)
+
+    common_paths = [set(_extract_evidence_path(item) for item in evidence) for evidence in evidence_sets]
+    shared_paths = set.intersection(*common_paths) if common_paths else set()
+    if shared_paths:
+        return sorted(shared_paths)
+
+    return []
+
+
 def recommend_fixes(findings: List[Finding]) -> List[FixRecommendation]:
     duplicates: Dict[str, List[Finding]] = {}
     for finding in findings:
@@ -117,6 +140,7 @@ def recommend_fixes(findings: List[Finding]) -> List[FixRecommendation]:
                 if len(group) > 1
                 else 'Remediate the specific finding with a targeted patch.'
             )
+        shared_code = _common_shared_code_evidence(group)
         recommendations.append(
             FixRecommendation(
                 id=f'fix-{key.replace(" ", "-")[:60]}',
@@ -127,6 +151,7 @@ def recommend_fixes(findings: List[Finding]) -> List[FixRecommendation]:
                 expected_risk_reduction=min(1.0, total_score / (len(findings) * 2)),
                 priority=priority,
                 remediation=remediation,
+                shared_code=shared_code,
             )
         )
 
