@@ -47,6 +47,23 @@ class TestSnykPluginParsing(unittest.TestCase):
         self.assertEqual(issues[0]["id"], "4")
         self.assertEqual(issues[0]["severity"], "critical")
 
+    def test_extracts_path_from_sarif_style_locations(self):
+        sample = {
+            'ruleId': 'javascript/HardcodedNonCryptoSecret/test',
+            'locations': [
+                {
+                    'id': 0,
+                    'physicalLocation': {
+                        'artifactLocation': {'uri': 'test/server/verifySpec.ts', 'uriBaseId': '%SRCROOT%'},
+                        'region': {'startLine': 263, 'endLine': 263, 'startColumn': 38, 'endColumn': 182},
+                    },
+                }
+            ],
+        }
+
+        from scanners.snyk.plugin import _extract_snyk_path
+        self.assertEqual(_extract_snyk_path(sample), 'test/server/verifySpec.ts')
+
     @patch.dict('os.environ', {'SNYK_TOKEN': 'token', 'SNYK_ORG': 'org'}, clear=True)
     @patch('scanners.snyk.plugin.requests.get')
     def test_snyk_api_plugin_enabled_and_scans(self, mock_get):
@@ -59,7 +76,8 @@ class TestSnykPluginParsing(unittest.TestCase):
         self.assertTrue(plugin.enabled)
         findings = plugin.scan('.')
         self.assertEqual(len(findings), 1)
-        self.assertEqual(findings[0].id, 'snyk-api-.-0')
+        self.assertTrue(findings[0].id.startswith('snyk-api-'))
+        self.assertLessEqual(len(findings[0].id), 20)
 
     @patch.dict('os.environ', {}, clear=True)
     @patch('scanners.snyk.plugin.shutil.which', return_value='/usr/bin/snyk')
@@ -73,8 +91,10 @@ class TestSnykPluginParsing(unittest.TestCase):
         self.assertTrue(plugin.enabled)
         findings = plugin.scan('.')
         self.assertEqual(len(findings), 2)
-        self.assertEqual(findings[0].id, 'snyk-.-0')
-        self.assertEqual(findings[1].id, 'snyk-.-1')
+        self.assertTrue(findings[0].id.startswith('snyk-'))
+        self.assertLessEqual(len(findings[0].id), 16)
+        self.assertTrue(findings[1].id.startswith('snyk-'))
+        self.assertLessEqual(len(findings[1].id), 16)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 
 from typing import Any, Dict, List
+import hashlib
 import os
 
 from core.plugins.base import ScannerPlugin
@@ -95,6 +96,70 @@ def _normalize_issue_evidence(issue: Dict[str, Any]) -> List[str]:
     return evidence
 
 
+def _extract_snyk_location_path(location: Any) -> str:
+    if not isinstance(location, dict):
+        return ''
+
+    path = location.get('path')
+    if path:
+        return str(path)
+
+    physical = location.get('physicalLocation')
+    if isinstance(physical, dict):
+        artifact = physical.get('artifactLocation')
+        if isinstance(artifact, dict):
+            uri = artifact.get('uri')
+            if uri:
+                return str(uri)
+
+    artifact = location.get('artifactLocation')
+    if isinstance(artifact, dict):
+        uri = artifact.get('uri')
+        if uri:
+            return str(uri)
+
+    return ''
+
+
+def _extract_snyk_path(issue: Dict[str, Any]) -> str:
+    for source in ('location', 'physicalLocation'):
+        path = _extract_snyk_location_path(issue.get(source))
+        if path:
+            return path
+
+    locations = issue.get('locations')
+    if isinstance(locations, list):
+        for entry in locations:
+            if not isinstance(entry, dict):
+                continue
+            path = _extract_snyk_location_path(entry.get('physicalLocation') or entry.get('location'))
+            if path:
+                return path
+
+    code_flows = issue.get('codeFlows')
+    if isinstance(code_flows, list):
+        for flow in code_flows:
+            if not isinstance(flow, dict):
+                continue
+            thread_flows = flow.get('threadFlows')
+            if isinstance(thread_flows, list):
+                for thread in thread_flows:
+                    if not isinstance(thread, dict):
+                        continue
+                    locations = thread.get('locations')
+                    if isinstance(locations, list):
+                        for location_entry in locations:
+                            if not isinstance(location_entry, dict):
+                                continue
+                            path = _extract_snyk_location_path(location_entry.get('location'))
+                            if path:
+                                return path
+
+    if issue.get('path'):
+        return str(issue.get('path'))
+    return ''
+
+
 def _load_json_safe(raw: str) -> Any:
     try:
         return json.loads(raw) if raw else {}
@@ -157,24 +222,33 @@ def _ensure_snyk_subprocess_success(proc: subprocess.CompletedProcess, data: Any
         raise SystemExit(f"{command} failed for {target}: subprocess exited with code {proc.returncode} and no JSON output")
 
 
+def _build_short_finding_id(prefix: str, target: str, title: str, path: str) -> str:
+    value = f"{prefix}:{target}:{title}:{path}"
+    digest = hashlib.sha256(value.encode('utf-8')).hexdigest()[:10]
+    return f"{prefix}-{digest}"
+
+
 def _build_snyk_findings(items: List[Dict[str, Any]], prefix: str, target: str) -> List[Finding]:
     findings: List[Finding] = []
-    for i, v in enumerate(items):
-        if not isinstance(v, dict):
+    for item in items:
+        if not isinstance(item, dict):
             continue
-        sev = _normalize_text_field(v.get('severity') or v.get('impact') or 'medium')
-        title = _normalize_text_field(v.get('title') or v.get('name') or v.get('message') or v.get('id') or v.get('issueId'))
-        description = _normalize_text_field(v.get('description') or v.get('message') or '')
-        evidence = _normalize_issue_evidence(v)
+        sev = _normalize_text_field(item.get('severity') or item.get('impact') or 'medium')
+        title = _normalize_text_field(item.get('title') or item.get('name') or item.get('message') or item.get('id') or item.get('issueId'))
+        description = _normalize_text_field(item.get('description') or item.get('message') or '')
+        evidence = _normalize_issue_evidence(item)
+        path_value = _extract_snyk_path(item)
+        finding_id = _build_short_finding_id(prefix, target, title, path_value)
         findings.append(
             Finding(
-                id=f"{prefix}-{target}-{i}",
+                id=finding_id,
                 source='snyk',
                 severity=str(sev),
                 title=str(title),
                 description=description,
+                path=path_value,
                 evidence=evidence,
-                metadata={'raw': v},
+                metadata={'raw': item},
             )
         )
     return findings
@@ -264,6 +338,7 @@ class SnykCLIPlugin(ScannerPlugin):
                     severity='info',
                     title='Snyk scan completed',
                     description='Snyk completed but produced no structured issues.',
+                    path=target,
                     evidence=[target],
                 )
             ]

@@ -64,7 +64,11 @@ impcator scan . --use-ai --code-path src/
 impcator scan . --snyk-org my-org-id --snyk-repo my-repo-name
 impcator map .
 impcator list-findings
-impcator list-findings --application-id claims-platform
+impcator list-findings --sort-by priority --no-descending
+impcator list-findings --sort-by risk --limit 20
+impcator list-findings --application-id claims-platform --sort-by effort --limit 10
+impcator list-findings --with-recommendations
+impcator list-findings --with-recommendations --sort-by expected-risk-reduction --limit 10
 impcator reprioritize
 impcator reprioritize --use-ai --provider openai
 ```
@@ -73,7 +77,15 @@ impcator reprioritize --use-ai --provider openai
 
 Scan results are persisted to a local SQLite database so findings can be reviewed and re-analyzed later.
 
-- `list-findings` lists findings stored in the database.
+- `list-findings` lists findings stored in the database. It supports sorting by `risk`, `effort`, or `priority`, and can return only the first `X` results.
+- `list-findings --with-recommendations` shows findings grouped by root cause with actionable fix recommendations. Each recommendation includes:
+  - **impacted_findings**: list of finding IDs affected by this root cause
+  - **effort**: estimated effort to fix (low, medium, high)
+  - **priority**: assessed priority (Critical, High, Medium, Low)
+  - **remediation**: specific guidance on how to fix the root cause
+  - **shared_code**: common code locations across related findings
+  - **expected_risk_reduction**: estimated risk reduction if the recommendation is implemented
+  - Use `--sort-by expected-risk-reduction` to sort recommendations by their impact (highest risk reduction first)
 - `reprioritize` re-runs prioritization on stored findings.
 - `reprioritize --use-ai` uses the selected AI provider to produce fix recommendations.
 

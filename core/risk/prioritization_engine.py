@@ -96,19 +96,32 @@ def _extract_evidence_path(value: str) -> str:
 
 def _common_shared_code_evidence(group: List[Finding]) -> List[str]:
     evidence_sets = [set(f.evidence) for f in group if f.evidence]
-    if not evidence_sets:
-        return []
+    shared_code: set[str] = set()
 
-    shared = set.intersection(*evidence_sets)
-    if shared:
-        return sorted(shared)
+    if evidence_sets:
+        shared_evidence = set.intersection(*evidence_sets)
+        if shared_evidence:
+            shared_code.update(shared_evidence)
 
-    common_paths = [set(_extract_evidence_path(item) for item in evidence) for evidence in evidence_sets]
-    shared_paths = set.intersection(*common_paths) if common_paths else set()
-    if shared_paths:
-        return sorted(shared_paths)
+        common_paths = [set(_extract_evidence_path(item) for item in evidence) for evidence in evidence_sets]
+        shared_paths = set.intersection(*common_paths) if common_paths else set()
+        for path in shared_paths:
+            path_specific = {
+                item
+                for finding in group
+                for item in finding.evidence
+                if _extract_evidence_path(item) == path
+            }
+            if path_specific:
+                shared_code.update(path_specific)
+            else:
+                shared_code.add(path)
 
-    return []
+    path_values = [f.path for f in group if f.path]
+    if len(path_values) == len(group):
+        shared_code.update(path_values)
+
+    return sorted(shared_code)
 
 
 def recommend_fixes(findings: List[Finding]) -> List[FixRecommendation]:

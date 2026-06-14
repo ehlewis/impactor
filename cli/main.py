@@ -18,7 +18,13 @@ from core.config.env_loader import load_environment
 from core.registry.plugin_registry import PluginRegistry
 from core.orchestration.orchestrator import ScanOrchestrator
 from core.events.event_bus import EventBus
-from core.risk.prioritization_engine import recommend_fixes, recommend_fixes_with_ai
+from core.risk.prioritization_engine import (
+    compute_risk_score,
+    determine_effort,
+    determine_priority,
+    recommend_fixes,
+    recommend_fixes_with_ai,
+)
 from core.storage.storage_manager import StorageManager
 from scanners.snyk.plugin import SnykAPIPlugin, SnykCLIPlugin
 from scanners.semgrep.plugin import SemgrepPlugin
@@ -120,11 +126,100 @@ def scan(
 
 
 @app.command('list-findings')
-def list_findings(application_id: Optional[str] = None):
+def list_findings(
+    application_id: Optional[str] = None,
+    sort_by: str = typer.Option(
+        'risk',
+        help='Sort findings by risk, effort, or priority. When using --with-recommendations, can also sort recommendations by expected-risk-reduction.',
+        show_default=True,
+        case_sensitive=False,
+        prompt=False,
+        rich_help_panel='Sorting',
+        metavar='SORT_BY',
+    ),
+    descending: bool = typer.Option(
+        True,
+        help='Sort in descending order.',
+        show_default=True,
+    ),
+    limit: Optional[int] = typer.Option(
+        None,
+        help='Return only the first X findings after sorting.',
+        show_default=True,
+        metavar='LIMIT',
+    ),
+    with_recommendations: bool = typer.Option(
+        False,
+        help='Show prioritized fix recommendations grouped by root cause.',
+        show_default=True,
+    ),
+):
     """List findings stored in the local database."""
     storage = StorageManager()
     findings = storage.load_findings(application_id) if application_id else storage.list_findings()
-    typer.echo(json.dumps([finding.dict() for finding in findings], indent=2))
+
+    sort_key = sort_by.strip().lower()
+    valid_sorts = {'risk', 'effort', 'priority', 'expected-risk-reduction'}
+    if sort_key not in valid_sorts:
+        raise typer.BadParameter("sort-by must be one of: risk, effort, priority, expected-risk-reduction")
+
+    if with_recommendations:
+        recommendations = recommend_fixes(findings)
+        
+        if sort_key == 'expected-risk-reduction':
+            recommendations.sort(key=lambda rec: rec.expected_risk_reduction, reverse=descending)
+        else:
+            # Sort findings first when displaying with recommendations
+            if sort_key == 'risk':
+                findings.sort(key=compute_risk_score, reverse=descending)
+            elif sort_key == 'effort':
+                effort_order = {'low': 1, 'medium': 2, 'high': 3}
+                findings.sort(
+                    key=lambda finding: effort_order.get(determine_effort(finding), 0),
+                    reverse=descending,
+                )
+            else:
+                priority_order = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1}
+                findings.sort(
+                    key=lambda finding: priority_order.get(determine_priority(compute_risk_score(finding)).lower(), 0),
+                    reverse=descending,
+                )
+        
+        if limit is not None:
+            if sort_key == 'expected-risk-reduction':
+                recommendations = recommendations[:limit]
+            else:
+                findings = findings[:limit]
+        
+        output = {
+            'findings': [finding.dict() for finding in findings],
+            'recommendations': [rec.dict() for rec in recommendations],
+        }
+        typer.echo(json.dumps(output, indent=2))
+    else:
+        # Sort findings without recommendations
+        if sort_key == 'risk':
+            findings.sort(key=compute_risk_score, reverse=descending)
+        elif sort_key == 'effort':
+            effort_order = {'low': 1, 'medium': 2, 'high': 3}
+            findings.sort(
+                key=lambda finding: effort_order.get(determine_effort(finding), 0),
+                reverse=descending,
+            )
+        elif sort_key == 'priority':
+            priority_order = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1}
+            findings.sort(
+                key=lambda finding: priority_order.get(determine_priority(compute_risk_score(finding)).lower(), 0),
+                reverse=descending,
+            )
+        else:
+            # expected-risk-reduction only makes sense with recommendations
+            raise typer.BadParameter("--sort-by expected-risk-reduction requires --with-recommendations")
+
+        if limit is not None:
+            findings = findings[:limit]
+
+        typer.echo(json.dumps([finding.dict() for finding in findings], indent=2))
 
 
 @app.command('reprioritize')

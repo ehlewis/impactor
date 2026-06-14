@@ -17,17 +17,21 @@ class SQLiteProvider(StorageProvider):
             db_path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.path) as conn:
             conn.execute(
-                'CREATE TABLE IF NOT EXISTS findings (id TEXT PRIMARY KEY, source TEXT, severity TEXT, title TEXT, description TEXT, application_id TEXT)'
+                'CREATE TABLE IF NOT EXISTS findings (id TEXT PRIMARY KEY, source TEXT, severity TEXT, title TEXT, description TEXT, path TEXT, application_id TEXT)'
             )
             conn.execute(
                 'CREATE TABLE IF NOT EXISTS findings_evidence (finding_id TEXT, evidence TEXT)'
             )
+            cursor = conn.execute("PRAGMA table_info(findings)")
+            columns = [row[1] for row in cursor.fetchall()]
+            if 'path' not in columns:
+                conn.execute('ALTER TABLE findings ADD COLUMN path TEXT')
 
     def save_finding(self, finding: Finding) -> None:
         with sqlite3.connect(self.path) as conn:
             conn.execute(
-                'INSERT OR REPLACE INTO findings (id, source, severity, title, description, application_id) VALUES (?, ?, ?, ?, ?, ?)',
-                (finding.id, finding.source, finding.severity, finding.title, finding.description, finding.application_id),
+                'INSERT OR REPLACE INTO findings (id, source, severity, title, description, path, application_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (finding.id, finding.source, finding.severity, finding.title, finding.description, finding.path, finding.application_id),
             )
             conn.execute('DELETE FROM findings_evidence WHERE finding_id = ?', (finding.id,))
             for evidence_item in finding.evidence:
@@ -41,7 +45,7 @@ class SQLiteProvider(StorageProvider):
             self.save_finding(finding)
 
     def load_findings(self, application_id: str = None) -> List[Finding]:
-        query = 'SELECT id, source, severity, title, description, application_id FROM findings'
+        query = 'SELECT id, source, severity, title, description, path, application_id FROM findings'
         params: List[str] = []
         if application_id:
             query += ' WHERE application_id = ?'
@@ -52,7 +56,7 @@ class SQLiteProvider(StorageProvider):
             cursor = conn.execute(query, params)
             rows = cursor.fetchall()
             for row in rows:
-                finding_id, source, severity, title, description, app_id = row
+                finding_id, source, severity, title, description, path, app_id = row
                 evidence = [
                     ev_row[0]
                     for ev_row in conn.execute('SELECT evidence FROM findings_evidence WHERE finding_id = ?', (finding_id,))
@@ -64,6 +68,7 @@ class SQLiteProvider(StorageProvider):
                         severity=severity,
                         title=title,
                         description=description,
+                        path=path or '',
                         application_id=app_id,
                         evidence=evidence,
                     )

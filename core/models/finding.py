@@ -8,6 +8,7 @@ class Finding(BaseModel):
     severity: str
     title: str
     description: str = ''
+    path: str = ''
     application_id: str = ''
     evidence: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
