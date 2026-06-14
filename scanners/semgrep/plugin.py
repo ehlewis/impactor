@@ -9,13 +9,5 @@ class SemgrepPlugin(ScannerPlugin):
     version = '0.1.0'
 
     def scan(self, target: str) -> List[Finding]:
-        return [
-            Finding(
-                id=f'semgrep-{target}-1',
-                source='semgrep',
-                severity='low',
-                title='Example Semgrep finding',
-                description='A placeholder Semgrep finding for the target.',
-                evidence=[f'{target}/src'],
-            )
-        ]
+        # Placeholder Semgrep integration. Replace with actual scan logic.
+        return []

@@ -1,6 +1,6 @@
 
-from pydantic import BaseModel
-from typing import List
+from pydantic import BaseModel, Field
+from typing import Any, Dict, List
 
 class Finding(BaseModel):
     id: str
@@ -9,4 +9,5 @@ class Finding(BaseModel):
     title: str
     description: str = ''
     application_id: str = ''
-    evidence: List[str] = []
+    evidence: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
