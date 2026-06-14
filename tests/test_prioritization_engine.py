@@ -11,7 +11,7 @@ class TestPrioritizationEngine(unittest.TestCase):
                 id='1',
                 source='snyk',
                 severity='high',
-                title='Test issue',
+                title='First issue',
                 description='Problem in code',
                 path='src/app/routes.py',
                 evidence=['src/app/routes.py:10'],
@@ -20,7 +20,7 @@ class TestPrioritizationEngine(unittest.TestCase):
                 id='2',
                 source='snyk',
                 severity='high',
-                title='Test issue',
+                title='Second issue',
                 description='Problem in code',
                 path='src/app/routes.py',
                 evidence=['src/app/routes.py:15'],
@@ -31,6 +31,7 @@ class TestPrioritizationEngine(unittest.TestCase):
         self.assertEqual(len(recommendations), 1)
         self.assertIn('src/app/routes.py:10', recommendations[0].shared_code)
         self.assertIn('src/app/routes.py:15', recommendations[0].shared_code)
+        self.assertEqual(recommendations[0].impacted_findings, ['1', '2'])
 
 
 if __name__ == '__main__':

@@ -68,6 +68,7 @@ impcator list-findings --sort-by priority --no-descending
 impcator list-findings --sort-by risk --limit 20
 impcator list-findings --application-id claims-platform --sort-by effort --limit 10
 impcator list-findings --with-recommendations
+impcator list-findings --id snyk-12345
 impcator list-findings --with-recommendations --sort-by expected-risk-reduction --limit 10
 impcator reprioritize
 impcator reprioritize --use-ai --provider openai

@@ -128,6 +128,13 @@ def scan(
 @app.command('list-findings')
 def list_findings(
     application_id: Optional[str] = None,
+    finding_id: Optional[str] = typer.Option(
+        None,
+        '--id',
+        '--finding-id',
+        help='Return only the finding with the given ID.',
+        show_default=True,
+    ),
     sort_by: str = typer.Option(
         'risk',
         help='Sort findings by risk, effort, or priority. When using --with-recommendations, can also sort recommendations by expected-risk-reduction.',
@@ -156,7 +163,11 @@ def list_findings(
 ):
     """List findings stored in the local database."""
     storage = StorageManager()
-    findings = storage.load_findings(application_id) if application_id else storage.list_findings()
+    if finding_id:
+        finding = storage.get_finding(finding_id)
+        findings = [finding] if finding else []
+    else:
+        findings = storage.load_findings(application_id) if application_id else storage.list_findings()
 
     sort_key = sort_by.strip().lower()
     valid_sorts = {'risk', 'effort', 'priority', 'expected-risk-reduction'}
