@@ -1,0 +1,1 @@
+# Impcator V3 Architecture\nACE + AME + ASMG + Scanner + Asset Provider architecture.
