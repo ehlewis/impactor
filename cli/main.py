@@ -3,7 +3,7 @@ import sys
 import os
 from pathlib import Path
 import json
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import typer
 
@@ -40,6 +40,21 @@ def build_registry() -> PluginRegistry:
     registry.register(SnykCLIPlugin())
     registry.register(SemgrepPlugin())
     return registry
+
+
+def _collect_code_context(findings, code_path: Optional[str] = None) -> dict[str, str]:
+    roots = [code_path] if code_path else sorted({finding.repository_root for finding in findings if finding.repository_root})
+    if not roots:
+        roots = ['.']
+
+    context: dict[str, str] = {}
+    for root in roots:
+        resolved_root = str(Path(root).resolve())
+        context.update({
+            f'{resolved_root}/{relative_path}': snippet
+            for relative_path, snippet in extract_code_context(root).items()
+        })
+    return context
 
 
 @app.command()
@@ -160,9 +175,24 @@ def list_findings(
         help='Show prioritized fix recommendations grouped by root cause.',
         show_default=True,
     ),
+    use_ai: bool = typer.Option(
+        False,
+        help='Add AI context on severity, impact, prevalence, and fix complexity.',
+        show_default=True,
+    ),
+    provider: Optional[str] = typer.Option(
+        None,
+        help='AI provider to use: openai, ollama, or local-stub.',
+    ),
+    code_path: Optional[str] = typer.Option(
+        None,
+        help='Optional source path for AI context. Defaults to each finding repository root.',
+    ),
 ):
     """List findings stored in the local database."""
     storage = StorageManager()
+    if use_ai and not with_recommendations:
+        raise typer.BadParameter('--use-ai requires --with-recommendations')
     if finding_id:
         finding = storage.get_finding(finding_id)
         findings = [finding] if finding else []
@@ -201,11 +231,24 @@ def list_findings(
                 recommendations = recommendations[:limit]
             else:
                 findings = findings[:limit]
+                recommendations = recommend_fixes(findings)
         
-        output = {
+        output: Dict[str, Any] = {
             'findings': [finding.dict() for finding in findings],
             'recommendations': [rec.dict() for rec in recommendations],
         }
+        if use_ai:
+            manager = build_ai_provider_manager()
+            try:
+                ai_enrichment = manager.enrich_recommendations(
+                    [finding.dict() for finding in findings],
+                    [recommendation.dict() for recommendation in recommendations],
+                    provider_name=provider,
+                    code_context=_collect_code_context(findings, code_path),
+                )
+            except ValueError as exc:
+                ai_enrichment = {'error': str(exc)}
+            output['ai_enrichment'] = ai_enrichment
         typer.echo(json.dumps(output, indent=2))
     else:
         # Sort findings without recommendations
@@ -250,7 +293,7 @@ def reprioritize(
     if use_ai:
         from core.models.finding import Finding
         parsed_findings = [Finding.parse_obj(item) for item in raw_findings]
-        code_context = extract_code_context(code_path or '.')
+        code_context = _collect_code_context(parsed_findings, code_path)
         recommendations = recommend_fixes_with_ai(
             parsed_findings,
             provider_name=provider,

@@ -87,6 +87,7 @@ Scan results are persisted to a local SQLite database so findings can be reviewe
   - **shared_code**: common code locations across related findings
   - **expected_risk_reduction**: estimated risk reduction if the recommendation is implemented
   - Use `--sort-by expected-risk-reduction` to sort recommendations by their impact (highest risk reduction first)
+- Add `--use-ai` to `list-findings --with-recommendations` or use `reprioritize --use-ai` to request contextual assessments from OpenAI or Ollama. AI assessments consider severity, application/user impact, prevalence across findings and code locations, and likely fix complexity. They are returned separately from deterministic recommendations and should be treated as advisory.
 - `reprioritize` re-runs prioritization on stored findings.
 - `reprioritize --use-ai` uses the selected AI provider to produce fix recommendations.
 
@@ -190,7 +191,7 @@ export OLLAMA_API_BASE="http://localhost:11434"
 
 ### AI provider selection
 
-The scan command supports optional AI-based prioritization via provider selection. You can also provide a code path for the AI to inspect source files, infer function behavior, and improve effort estimation:
+The scan command supports optional AI-based prioritization via OpenAI or Ollama. You can also provide a code path for the AI to inspect source files, infer function behavior, and assess severity, impact, prevalence, and fix complexity:
 
 ```bash
 python cli/main.py scan . --use-ai
@@ -198,6 +199,8 @@ python cli/main.py scan . --use-ai --provider openai
 python cli/main.py scan . --use-ai --provider ollama
 python cli/main.py scan . --use-ai --provider local-stub
 python cli/main.py scan . --use-ai --code-path src/
+python cli/main.py list-findings --with-recommendations --use-ai --provider openai
+python cli/main.py reprioritize --use-ai --provider ollama
 ```
 
 If you have the Snyk CLI installed locally, Impcator will use it automatically when no `SNYK_TOKEN` is configured. This is exposed as the `snyk-cli` scanner plugin. Install Snyk locally with:
@@ -221,7 +224,7 @@ Notes:
 - `--snyk-org` should be the Snyk organization identifier. When provided, Impcator will request projects from that org and fetch issues via the Snyk API.
 - `--snyk-repo` filters projects within the org by name; provide the repo/project name to limit results.
 
-Impcator computes deterministic recommendations locally first and uses AI mainly to enrich those recommendations with context from the code. If `--code-path` is omitted, the scan target is used for code context extraction.
+Impcator computes deterministic recommendations locally first and uses AI to add contextual assessments without replacing that baseline. For stored findings, repository roots are used to gather code context per application; `--code-path` can override this. AI output is requested as structured JSON, includes rationale and confidence, and is advisory rather than authoritative.
 
 AI prioritization now favors contextual reasoning for broader SAST false-positive patterns. For example, findings can be downgraded when they are detected in:
 

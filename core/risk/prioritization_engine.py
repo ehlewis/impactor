@@ -97,12 +97,13 @@ def _extract_evidence_path(value: str) -> str:
 
 def _extract_shared_code_anchors(finding: Finding) -> set[str]:
     anchors: set[str] = set()
+    scope = f'{finding.repository_root}|{finding.application_id}'
     if finding.path:
-        anchors.add(finding.path)
+        anchors.add(f'{scope}|{finding.path}')
     for item in finding.evidence:
         path_value = _extract_evidence_path(item)
         if path_value:
-            anchors.add(path_value)
+            anchors.add(f'{scope}|{path_value}')
     return anchors
 
 

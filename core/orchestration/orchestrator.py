@@ -1,4 +1,5 @@
 
+from pathlib import Path
 from typing import Dict, List
 
 from ..registry.plugin_registry import PluginRegistry
@@ -35,6 +36,11 @@ class ScanOrchestrator:
         components = self.run_discovery(target)
         application = Application(id=target, name=target, components=components)
         findings = self.run_scans(target)
+        repository_root = str(Path(target).resolve())
+        for finding in findings:
+            finding.application_id = application.id
+            finding.application_name = application.name
+            finding.repository_root = repository_root
         self.event_bus.publish('orchestrator.finished', {
             'target': target,
             'application_id': application.id,

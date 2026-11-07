@@ -10,5 +10,7 @@ class Finding(BaseModel):
     description: str = ''
     path: str = ''
     application_id: str = ''
+    application_name: str = ''
+    repository_root: str = ''
     evidence: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)

@@ -109,25 +109,4 @@ class OpenAIProvider(AIProvider):
         recommendations: List[Dict],
         code_context: Optional[Dict[str, str]] = None,
     ) -> str:
-        findings_json = '\n'.join([
-            f"- {finding.get('id')}: {finding.get('title')} ({finding.get('severity')}) - {finding.get('description')}"
-            for finding in findings
-        ])
-        recommendations_json = '\n'.join([
-            f"- {rec.get('id')}: {rec.get('title')} | effort={rec.get('effort')} | priority={rec.get('priority')} | remediation={rec.get('remediation')}"
-            for rec in recommendations
-        ])
-        context_section = ''
-        if code_context:
-            context_section = '\n\nRelevant code context samples:\n' + '\n'.join(
-                [f"{path}: {snippet[:200].replace('\n', ' ')}..." for path, snippet in code_context.items()]
-            )
-        return (
-            'You are an application security risk advisor. Here are deterministic fix recommendations already computed by Impactor. '
-            'Use the code context to enrich those recommendations with extra reasoning, and indicate whether any priorities or effort estimates should be adjusted based on likely code behavior. '
-            'Do not replace the deterministic recommendations unless there is strong evidence from the code context. '
-            'Provide a concise summary of suggested adjustments and the reasoning for each recommendation.\n\n'
-            f'Findings:\n{findings_json}\n\n'
-            f'Recommendations:\n{recommendations_json}'
-            f'{context_section}'
-        )
+        return super()._build_enrichment_prompt(findings, recommendations, code_context)

@@ -33,6 +33,36 @@ class TestPrioritizationEngine(unittest.TestCase):
         self.assertIn('src/app/routes.py:15', recommendations[0].shared_code)
         self.assertEqual(recommendations[0].impacted_findings, ['1', '2'])
 
+    def test_same_relative_path_in_different_repositories_is_not_grouped(self):
+        findings = [
+            Finding(
+                id='repo-a',
+                source='snyk',
+                severity='high',
+                title='Issue',
+                path='src/routes.py',
+                repository_root='/work/repo-a',
+                application_id='app-a',
+            ),
+            Finding(
+                id='repo-b',
+                source='snyk',
+                severity='high',
+                title='Issue',
+                path='src/routes.py',
+                repository_root='/work/repo-b',
+                application_id='app-b',
+            ),
+        ]
+
+        recommendations = recommend_fixes(findings)
+
+        self.assertEqual(len(recommendations), 2)
+        self.assertCountEqual(
+            [recommendation.impacted_findings for recommendation in recommendations],
+            [['repo-a'], ['repo-b']],
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -17,7 +17,7 @@ class SQLiteProvider(StorageProvider):
             db_path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.path) as conn:
             conn.execute(
-                'CREATE TABLE IF NOT EXISTS findings (id TEXT PRIMARY KEY, source TEXT, severity TEXT, title TEXT, description TEXT, path TEXT, application_id TEXT)'
+                'CREATE TABLE IF NOT EXISTS findings (id TEXT PRIMARY KEY, source TEXT, severity TEXT, title TEXT, description TEXT, path TEXT, application_id TEXT, application_name TEXT, repository_root TEXT)'
             )
             conn.execute(
                 'CREATE TABLE IF NOT EXISTS findings_evidence (finding_id TEXT, evidence TEXT)'
@@ -26,12 +26,26 @@ class SQLiteProvider(StorageProvider):
             columns = [row[1] for row in cursor.fetchall()]
             if 'path' not in columns:
                 conn.execute('ALTER TABLE findings ADD COLUMN path TEXT')
+            if 'application_name' not in columns:
+                conn.execute('ALTER TABLE findings ADD COLUMN application_name TEXT')
+            if 'repository_root' not in columns:
+                conn.execute('ALTER TABLE findings ADD COLUMN repository_root TEXT')
 
     def save_finding(self, finding: Finding) -> None:
         with sqlite3.connect(self.path) as conn:
             conn.execute(
-                'INSERT OR REPLACE INTO findings (id, source, severity, title, description, path, application_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                (finding.id, finding.source, finding.severity, finding.title, finding.description, finding.path, finding.application_id),
+                'INSERT OR REPLACE INTO findings (id, source, severity, title, description, path, application_id, application_name, repository_root) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                (
+                    finding.id,
+                    finding.source,
+                    finding.severity,
+                    finding.title,
+                    finding.description,
+                    finding.path,
+                    finding.application_id,
+                    finding.application_name,
+                    finding.repository_root,
+                ),
             )
             conn.execute('DELETE FROM findings_evidence WHERE finding_id = ?', (finding.id,))
             for evidence_item in finding.evidence:
@@ -45,7 +59,7 @@ class SQLiteProvider(StorageProvider):
             self.save_finding(finding)
 
     def load_findings(self, application_id: str = None) -> List[Finding]:
-        query = 'SELECT id, source, severity, title, description, path, application_id FROM findings'
+        query = 'SELECT id, source, severity, title, description, path, application_id, application_name, repository_root FROM findings'
         params: List[str] = []
         if application_id:
             query += ' WHERE application_id = ?'
@@ -56,7 +70,7 @@ class SQLiteProvider(StorageProvider):
             cursor = conn.execute(query, params)
             rows = cursor.fetchall()
             for row in rows:
-                finding_id, source, severity, title, description, path, app_id = row
+                finding_id, source, severity, title, description, path, app_id, application_name, repository_root = row
                 evidence = [
                     ev_row[0]
                     for ev_row in conn.execute('SELECT evidence FROM findings_evidence WHERE finding_id = ?', (finding_id,))
@@ -70,6 +84,8 @@ class SQLiteProvider(StorageProvider):
                         description=description,
                         path=path or '',
                         application_id=app_id,
+                        application_name=application_name or '',
+                        repository_root=repository_root or '',
                         evidence=evidence,
                     )
                 )
